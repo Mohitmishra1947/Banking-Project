@@ -1,7 +1,7 @@
 import os
 
-# Let colors work on Windows terminals
-os.system("")
+# fix colors for windows cmd
+os.system('')
 
 WIDTH = 50
 COLORS = {
@@ -16,7 +16,14 @@ def rs(x):
     return f"Rs.{x:,.2f}"
 
 def time_text(months):
-    return f"{months // 12} years {months % 12} months"
+    y = months // 12
+    m = months % 12
+    if y > 0 and m > 0:
+        return f"{y} years {m} months"
+    elif y > 0:
+        return f"{y} years"
+    else:
+        return f"{m} months"
 
 def banner(title, color="cyan"):
     print(c("╔" + "═" * (WIDTH - 2) + "╗", color))
@@ -24,7 +31,8 @@ def banner(title, color="cyan"):
     print(c("╚" + "═" * (WIDTH - 2) + "╝", color))
 
 def section(title, color="blue"):
-    print("\n" + c(f"── {title} ".ljust(WIDTH, "─"), color))
+    line = f"── {title} "
+    print("\n" + c(line.ljust(WIDTH, "─"), color))
 
 def ok(msg):
     print(c(f"  ✔ {msg}", "green"))

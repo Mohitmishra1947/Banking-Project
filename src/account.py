@@ -1,194 +1,415 @@
 import os
 from datetime import datetime
+
 from src.ui import c, rs, time_text, banner, section, ok, bad, info
 from src.loan import Loan, SAVINGS_RATE, INTEREST_TAX, GST
 
-FOLDER = os.path.dirname(os.path.abspath(__file__))
-BILLS_FOLDER = os.path.join(os.path.dirname(FOLDER), "bills here")
+
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+BILLS_DIRECTORY = os.path.join(os.path.dirname(CURRENT_DIR), "bills here")
+
 
 class Account:
-    def __init__(self, name, opening):
+
+    def __init__(self, name, opening_balance):
         self.name = name
-        self.opening = opening
-        self.balance = opening
-        self.loans = []          
-        self.months = 0          
-        self.history = []        
-        self.deposited = self.withdrawn = 0
-        self.interest = self.tax = 0
-        self.loan_taken = self.loan_repaid = self.loan_interest = 0
-        self.fees = self.gst = 0
+        self.opening = opening_balance
+        self.balance = opening_balance
+
+        self.loans = []
+        self.months = 0
+        self.history = []
+
+        self.deposited = 0
+        self.withdrawn = 0
+        self.interest = 0
+        self.tax = 0
+
+        self.loan_taken = 0
+        self.loan_repaid = 0
+        self.loan_interest = 0
+        self.fees = 0
+        self.gst = 0
 
     @property
     def loan(self):
-        return sum(l.outstanding for l in self.loans)
+        total = 0
+
+        for loan in self.loans:
+            total = total + loan.outstanding
+
+        return total
 
     def deposit(self, amount):
         if amount <= 0:
-            bad("Amount must be more than 0.")
+            bad("Enter an amount greater than 0.")
             return
-        self.balance += amount
-        self.deposited += amount
+
+        self.balance = self.balance + amount
+        self.deposited = self.deposited + amount
+
         self.history.append(("Deposit", amount, "+"))
-        ok(f"Deposited {rs(amount)}")
+
+        ok("Money deposited.")
 
     def withdraw(self, amount):
         if amount <= 0:
-            bad("Amount must be more than 0.")
-        elif amount > self.balance:
-            bad("Not enough balance.")
-        else:
-            self.balance -= amount
-            self.withdrawn += amount
-            self.history.append(("Withdrawal", amount, "-"))
-            print()
-            print(c("  ┌" + "─" * 30 + "┐", "magenta"))
-            print(c("  │", "magenta") + "        WITHDRAWAL SLIP       " + c("│", "magenta"))
-            print(c("  ├" + "─" * 30 + "┤", "magenta"))
-            for label, value in (("Name", self.name),
-                                 ("Date", datetime.now().strftime('%d-%m-%Y %H:%M')),
-                                 ("Amount", rs(amount))):
-                print(c("  │", "magenta") + f" {label:<7}: {value:<20}" + c("│", "magenta"))
-            print(c("  └" + "─" * 30 + "┘", "magenta"))
+            bad("Enter an amount greater than 0.")
+            return
+
+        if amount > self.balance:
+            bad("You don't have enough balance.")
+            return
+
+        self.balance = self.balance - amount
+        self.withdrawn = self.withdrawn + amount
+
+        self.history.append(("Withdrawal", amount, "-"))
+
+        print()
+        print("Withdrawal Slip")
+        print("-----------------------------")
+        print("Name  :", self.name)
+        print("Date  :", datetime.now().strftime("%d-%m-%Y %H:%M"))
+        print("Amount:", rs(amount))
+        print("-----------------------------")
 
     def check_balance(self):
         section("ACCOUNT SUMMARY")
-        print(f"  Balance    : {c(rs(self.balance), 'green')}")
-        print(f"  Loans due  : {c(rs(self.loan), 'red') if self.loan else rs(0)}")
-        print(f"  Net worth  : {c(rs(self.balance - self.loan), 'bold')}")
-        print(f"  Bank time  : {time_text(self.months)}")
+
+        print("Balance :", c(rs(self.balance), "green"))
+
+        if self.loan > 0:
+            print("Loans   :", c(rs(self.loan), "red"))
+        else:
+            print("Loans   :", rs(0))
+
+        print("Net worth :", rs(self.balance - self.loan))
+        print("Bank time :", time_text(self.months))
 
     def room_for(self, kind):
-        used = sum(l.outstanding for l in self.loans if l.kind is kind)
-        return max(self.balance * kind["limit"] - used, 0)
+        borrowed = 0
+
+        for loan in self.loans:
+            if loan.kind is kind:
+                borrowed = borrowed + loan.outstanding
+
+        maximum = self.balance * kind["limit"]
+        room = maximum - borrowed
+
+        if room < 0:
+            return 0
+
+        return room
 
     def take_loan(self, kind, amount, months):
         fee = round(amount * kind["fee"], 2)
         gst = round(fee * GST, 2)
-        loan = Loan(kind, amount, months)
-        self.loans.append(loan)
-        self.balance += amount - fee - gst
-        self.loan_taken += amount
-        self.fees += fee
-        self.gst += gst
-        self.history += [(f"{kind['name']} amount", amount, "+"),
-                         (f"{kind['name']} fee", fee, "-"),
-                         ("GST on fee", gst, "-")]
+
+        new_loan = Loan(kind, amount, months)
+        self.loans.append(new_loan)
+
+        received = amount - fee - gst
+
+        self.balance = self.balance + received
+        self.loan_taken = self.loan_taken + amount
+        self.fees = self.fees + fee
+        self.gst = self.gst + gst
+
+        self.history.append(
+            (kind["name"] + " amount", amount, "+")
+        )
+
+        self.history.append(
+            (kind["name"] + " fee", fee, "-")
+        )
+
+        self.history.append(
+            ("GST on fee", gst, "-")
+        )
+
         print()
-        banner(f"{kind['name'].upper()} APPROVED", "green")
-        print(f"  Loan amount      : {rs(amount)}")
-        print(f"  Processing fee   : {rs(fee)}  ({kind['fee'] * 100:g}%)")
-        print(f"  GST on fee       : {rs(gst)}  ({GST * 100:.0f}%)")
-        print(f"  Credited to you  : {c(rs(amount - fee - gst), 'green')}")
-        print(f"  Interest rate    : {kind['rate'] * 100:g}% per year")
-        print(f"  Time             : {time_text(months)}")
-        print(f"  Monthly EMI      : {c(rs(loan.emi), 'yellow')}")
+        banner(kind["name"].upper() + " APPROVED", "green")
+
+        print("Loan amount :", rs(amount))
+        print("Fee         :", rs(fee))
+        print("GST         :", rs(gst))
+        print("Received    :", rs(received))
+        print("Interest    :", kind["rate"] * 100, "%")
+        print("Time        :", time_text(months))
+        print("Monthly EMI :", rs(new_loan.emi))
 
     def repay_loan(self, loan, amount):
         if amount <= 0:
-            bad("Amount must be more than 0.")
-        elif amount > loan.outstanding + 0.005:
-            bad(f"You only owe {rs(loan.outstanding)} on this loan.")
-        elif amount > self.balance:
-            bad("Not enough balance to repay that much.")
-        else:
-            amount = min(amount, loan.outstanding)
-            self.balance -= amount
-            loan.outstanding -= amount
-            self.loan_repaid += amount
-            self.history.append((f"{loan.name} repayment", amount, "-"))
-            ok(f"Repaid {rs(amount)} on your {loan.name}")
-            if loan.outstanding <= 0.005:
-                self.loans.remove(loan)
-                print(c(f"  ★ Congratulations! Your {loan.name} is fully paid off! ★", "green"))
+            bad("Enter an amount greater than 0.")
+            return
+
+        if amount > loan.outstanding + 0.005:
+            bad("You cannot pay more than the loan amount.")
+            return
+
+        if amount > self.balance:
+            bad("You don't have enough balance.")
+            return
+
+        self.balance = self.balance - amount
+        loan.outstanding = loan.outstanding - amount
+        self.loan_repaid = self.loan_repaid + amount
+
+        self.history.append(
+            (loan.name + " repayment", amount, "-")
+        )
+
+        ok("Loan repayment successful.")
+
+        if loan.outstanding <= 0.005:
+            self.loans.remove(loan)
+            print(loan.name, "has been fully paid.")
 
     def fast_forward(self, months):
-        earned = taxed = loan_int = 0
-        for _ in range(months):
-            i = round(self.balance * SAVINGS_RATE / 12, 2)
-            t = round(i * INTEREST_TAX, 2)
-            self.balance += i - t
-            earned += i
-            taxed += t
-            for l in self.loans:
-                li = round(l.outstanding * l.rate / 12, 2)
-                l.outstanding += li
-                loan_int += li
-        self.months += months
-        self.interest += earned
-        self.tax += taxed
-        self.loan_interest += loan_int
-        if earned:
-            self.history.append((f"Savings interest ({months} mo)", earned, "+"))
-            self.history.append(("Tax on interest (10%)", taxed, "-"))
-        if loan_int:
-            self.history.append((f"Loan interest ({months} mo)", loan_int, "!"))
+        total_interest = 0
+        total_tax = 0
+        total_loan_interest = 0
+
+        for i in range(months):
+            interest = round(
+                self.balance * SAVINGS_RATE / 12,
+                2
+            )
+
+            tax = round(
+                interest * INTEREST_TAX,
+                2
+            )
+
+            self.balance = self.balance + interest - tax
+
+            total_interest = total_interest + interest
+            total_tax = total_tax + tax
+
+            for loan in self.loans:
+                loan_interest = round(
+                    loan.outstanding * loan.rate / 12,
+                    2
+                )
+
+                loan.outstanding = (
+                    loan.outstanding + loan_interest
+                )
+
+                total_loan_interest = (
+                    total_loan_interest + loan_interest
+                )
+
+        self.months = self.months + months
+
+        self.interest = self.interest + total_interest
+        self.tax = self.tax + total_tax
+        self.loan_interest = (
+            self.loan_interest + total_loan_interest
+        )
+
+        if total_interest > 0:
+            self.history.append(
+                ("Savings interest", total_interest, "+")
+            )
+
+            self.history.append(
+                ("Tax on interest", total_tax, "-")
+            )
+
+        if total_loan_interest > 0:
+            self.history.append(
+                ("Loan interest", total_loan_interest, "!")
+            )
+
         section("TIME PASSED")
-        print(f"  {months} month(s) passed. Bank time is now {time_text(self.months)}.")
-        print(f"  Savings interest earned : {c('+' + rs(earned), 'green')}")
-        print(f"  Tax cut (10%)           : {c('-' + rs(taxed), 'red')}")
-        print(f"  Loan interest added     : {c(rs(loan_int), 'yellow')}")
+
+        print(months, "month(s) passed.")
+        print("Savings interest:", rs(total_interest))
+        print("Tax:", rs(total_tax))
+        print("Loan interest:", rs(total_loan_interest))
 
     def show_history(self):
         section("TRANSACTION HISTORY")
+
         if not self.history:
             info("No transactions yet.")
-        for i, (label, amount, sign) in enumerate(self.history, 1):
+            return
+
+        number = 1
+
+        for item in self.history:
+            label = item[0]
+            amount = item[1]
+            sign = item[2]
+
             if sign == "+":
-                shown = c(f"+{rs(amount)}", "green")
+                text = "+" + rs(amount)
+
             elif sign == "-":
-                shown = c(f"-{rs(amount)}", "red")
+                text = "-" + rs(amount)
+
             else:
-                shown = c(f"+{rs(amount)} (added to loan)", "yellow")
-            print(f"  {i:>2}. {label:<30} {shown}")
+                text = "+" + rs(amount) + " added to loan"
+
+            print(number, ".", label, text)
+
+            number = number + 1
 
     def print_bill(self):
         now = datetime.now()
-        line = "=" * 48
-        rows = [
-            "", line, "            LUMEN BANK - BILL", line,
-            f"  Name       : {self.name}",
-            f"  Date       : {now.strftime('%d-%m-%Y %H:%M')}",
-            f"  Bank time  : {time_text(self.months)}",
-            "-" * 48,
-            f"  {'Opening balance':<30} {rs(self.opening):>15}",
-        ]
-        for label, amount, sign in self.history:
-            shown = "*" if sign == "!" else sign
-            rows.append(f"  {label:<30}{shown}{rs(amount):>15}")
-        rows += [
-            "  * added to your loans, not your balance",
-            "-" * 48,
-            f"  {'Total deposited':<30} {rs(self.deposited):>15}",
-            f"  {'Total withdrawn':<30} {rs(self.withdrawn):>15}",
-            f"  {'Savings interest earned':<30} {rs(self.interest):>15}",
-            f"  {'Tax on interest':<30} {rs(self.tax):>15}",
-            f"  {'Loans taken':<30} {rs(self.loan_taken):>15}",
-            f"  {'Loan interest charged':<30} {rs(self.loan_interest):>15}",
-            f"  {'Loan repaid':<30} {rs(self.loan_repaid):>15}",
-            f"  {'Loan fees + GST':<30} {rs(self.fees + self.gst):>15}",
-        ]
+
+        rows = []
+
+        rows.append("=" * 48)
+        rows.append("LUMEN BANK - STATEMENT")
+        rows.append("=" * 48)
+
+        rows.append("Name      : " + self.name)
+
+        rows.append(
+            "Date      : " +
+            now.strftime("%d-%m-%Y %H:%M")
+        )
+
+        rows.append(
+            "Bank time : " +
+            time_text(self.months)
+        )
+
+        rows.append("-" * 48)
+
+        rows.append(
+            "Opening balance : " +
+            rs(self.opening)
+        )
+
+        for item in self.history:
+            label = item[0]
+            amount = item[1]
+            sign = item[2]
+
+            if sign == "!":
+                sign = "*"
+
+            rows.append(
+                label + " " + sign + rs(amount)
+            )
+
+        rows.append("-" * 48)
+
+        rows.append(
+            "Total deposited : " +
+            rs(self.deposited)
+        )
+
+        rows.append(
+            "Total withdrawn : " +
+            rs(self.withdrawn)
+        )
+
+        rows.append(
+            "Savings interest: " +
+            rs(self.interest)
+        )
+
+        rows.append(
+            "Tax on interest : " +
+            rs(self.tax)
+        )
+
+        rows.append(
+            "Loans taken     : " +
+            rs(self.loan_taken)
+        )
+
+        rows.append(
+            "Loan interest   : " +
+            rs(self.loan_interest)
+        )
+
+        rows.append(
+            "Loan repaid     : " +
+            rs(self.loan_repaid)
+        )
+
+        rows.append(
+            "Loan fees + GST : " +
+            rs(self.fees + self.gst)
+        )
+
         if self.loans:
             rows.append("-" * 48)
-            rows.append("  LOANS STILL RUNNING")
-            for l in self.loans:
-                rows.append(f"  {l.name:<30} {rs(l.outstanding):>15}")
-        rows += [
-            "-" * 48,
-            f"  {'REMAINING BALANCE':<30} {rs(self.balance):>15}",
-            f"  {'LOANS STILL DUE':<30} {rs(self.loan):>15}",
-            f"  {'NET WORTH':<30} {rs(self.balance - self.loan):>15}",
-            line, "   Thank you for banking with us!", line,
-        ]
-        text = "\n".join(rows)
-        print(c(text, "cyan"))
+            rows.append("LOANS STILL RUNNING")
 
-        safe = "".join(ch for ch in self.name if ch.isalnum()) or "customer"
-        filename = f"bill_{safe}_{now.strftime('%Y%m%d_%H%M%S')}.txt"
+            for loan in self.loans:
+                rows.append(
+                    loan.name + " " +
+                    rs(loan.outstanding)
+                )
+
+        rows.append("-" * 48)
+
+        rows.append(
+            "Remaining balance : " +
+            rs(self.balance)
+        )
+
+        rows.append(
+            "Loans still due   : " +
+            rs(self.loan)
+        )
+
+        rows.append(
+            "Net worth         : " +
+            rs(self.balance - self.loan)
+        )
+
+        rows.append("=" * 48)
+        rows.append("Thanks for banking with us!")
+        rows.append("=" * 48)
+
+        statement = "\n".join(rows)
+
+        print(statement)
+
+        safe_name = ""
+
+        for ch in self.name:
+            if ch.isalnum():
+                safe_name = safe_name + ch
+
+        if safe_name == "":
+            safe_name = "customer"
+
+        filename = (
+            "bill_" +
+            safe_name +
+            "_" +
+            now.strftime("%Y%m%d_%H%M%S") +
+            ".txt"
+        )
+
         try:
-            os.makedirs(BILLS_FOLDER, exist_ok=True)
-            with open(os.path.join(BILLS_FOLDER, filename), "w", encoding="utf-8") as f:
-                f.write(text + "\n")
-            ok(f"Bill saved in the 'bills here' folder as {filename}")
+            os.makedirs(
+                BILLS_DIRECTORY,
+                exist_ok=True
+            )
+
+            file_path = os.path.join(
+                BILLS_DIRECTORY,
+                filename
+            )
+
+            with open(
+                file_path,
+                "w",
+                encoding="utf-8"
+            ) as file:
+                file.write(statement + "\n")
+
+            ok("Bill saved as " + filename)
+
         except OSError:
-            bad("Could not save the bill file.")
+            bad("Could not save the bill.")
